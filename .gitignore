@@ -5,3 +5,7 @@
 build
 .godot
 crun.sh
+env.txt
+*.env
+resources/config.tres
+.DS_Store
