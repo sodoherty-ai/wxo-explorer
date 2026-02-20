@@ -191,6 +191,26 @@ func select_by_id(id: String):
 		_select_node(_nodes[id])
 
 
+func get_node_cluster_bounds(id: String) -> Array:
+	## Returns [center: Vector3, radius: float] for the node and its connected nodes.
+	if not _nodes.has(id):
+		return [Vector3.ZERO, 10.0]
+	var positions: Array[Vector3] = [_nodes[id].position]
+	for edge in _layout.edges:
+		if edge[0] == id and _nodes.has(edge[1]):
+			positions.append(_nodes[edge[1]].position)
+		elif edge[1] == id and _nodes.has(edge[0]):
+			positions.append(_nodes[edge[0]].position)
+	var center = Vector3.ZERO
+	for p in positions:
+		center += p
+	center /= positions.size()
+	var radius = 0.0
+	for p in positions:
+		radius = maxf(radius, center.distance_to(p))
+	return [center, maxf(radius, 3.0)]
+
+
 func _select_node(node: GraphNodeBase):
 	if _selected_node == node:
 		return

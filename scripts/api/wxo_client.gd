@@ -9,6 +9,8 @@ signal debug_log(message: String)
 var _base_url: String
 var _auth_header: String
 var _http: HTTPRequest
+var _iam_manager: IamTokenManager
+var _is_local: bool = true
 
 
 func _ready():
@@ -16,14 +18,30 @@ func _ready():
 	add_child(_http)
 
 
-func configure(config: ConfigData) -> void:
-	_base_url = config.server_url.rstrip("/") + "/api"
-	_auth_header = config.get_auth_header()
+func configure(config: ConfigData, iam_manager: IamTokenManager = null) -> void:
+	_base_url = config.get_base_api_url()
+	_is_local = (config.auth_mode == ConfigData.AuthMode.LOCAL_BEARER)
+	_iam_manager = iam_manager
+	if iam_manager:
+		_auth_header = ""  # Will be set dynamically from IAM manager
+	else:
+		_auth_header = config.get_auth_header()
+
+
+func _get_auth_header() -> String:
+	if _iam_manager:
+		return _iam_manager.get_auth_header()
+	return _auth_header
 
 
 func test_connection() -> void:
+	if _iam_manager and not _iam_manager.is_token_valid():
+		var success = await _iam_manager.ensure_token()
+		if not success:
+			connection_tested.emit(false, "Failed to obtain IAM token")
+			return
 	var url = _base_url + "/v1/orchestrate/agents"
-	var headers = ["Authorization: " + _auth_header]
+	var headers = ["Authorization: " + _get_auth_header()]
 	_http.request_completed.connect(_on_test_completed, CONNECT_ONE_SHOT)
 	var err = _http.request(url, headers, HTTPClient.METHOD_GET)
 	if err != OK:
@@ -31,9 +49,15 @@ func test_connection() -> void:
 
 
 func fetch_all() -> void:
+	if _iam_manager and not _iam_manager.is_token_valid():
+		var success = await _iam_manager.ensure_token()
+		if not success:
+			fetch_error.emit("Failed to obtain IAM token")
+			return
 	# Fetch sequentially (local dev server may not handle concurrent requests)
 	var agents_result = await _fetch_endpoint("/v1/orchestrate/agents", "Agents")
-	var tools_result = await _fetch_endpoint("/v1/tools", "Tools")
+	var tools_path = "/v1/tools" if _is_local else "/v1/orchestrate/tools"
+	var tools_result = await _fetch_endpoint(tools_path, "Tools")
 	var kb_result = await _fetch_endpoint("/v1/orchestrate/knowledge-bases", "Knowledge bases")
 
 	# Check for errors
@@ -107,7 +131,7 @@ func _fetch_endpoint(path: String, label: String) -> _ApiResult:
 
 func _start_request(path: String) -> HTTPRequest:
 	var url = _base_url + path
-	var headers = ["Authorization: " + _auth_header]
+	var headers = ["Authorization: " + _get_auth_header()]
 	var http = HTTPRequest.new()
 	add_child(http)
 	var err = http.request(url, headers, HTTPClient.METHOD_GET)

@@ -8,7 +8,7 @@ var mode: Mode = Mode.ORBIT
 
 # Orbit state
 var orbit_target: Vector3 = Vector3.ZERO
-var orbit_distance: float = 20.0
+var orbit_distance: float = 50.0
 var orbit_yaw: float = 30.0
 var orbit_pitch: float = 30.0
 

@@ -15,13 +15,15 @@ signal data_ready(graph_data: WxODataModel.GraphData)
 
 var config: ConfigData
 var _wxo_client: WxOClient
+var iam_manager: IamTokenManager
 
 
 func _ready():
 	config = ConfigData.load_config()
 
 	auth_mode_select.add_item("Local (Bearer Token)", ConfigData.AuthMode.LOCAL_BEARER)
-	auth_mode_select.add_item("API Key", ConfigData.AuthMode.SAAS_API_KEY)
+	auth_mode_select.add_item("API Key (wxO)", ConfigData.AuthMode.WXO_API_KEY)
+	auth_mode_select.add_item("API Key (IBM Cloud)", ConfigData.AuthMode.IBM_CLOUD_API_KEY)
 
 	server_url_input.text = config.server_url
 	auth_mode_select.selected = config.auth_mode
@@ -48,7 +50,7 @@ func _on_auth_mode_changed(_index: int):
 func _update_auth_sections():
 	var mode = auth_mode_select.get_selected_id()
 	bearer_section.visible = (mode == ConfigData.AuthMode.LOCAL_BEARER)
-	api_key_section.visible = (mode == ConfigData.AuthMode.SAAS_API_KEY)
+	api_key_section.visible = (mode in [ConfigData.AuthMode.WXO_API_KEY, ConfigData.AuthMode.IBM_CLOUD_API_KEY])
 
 
 func _on_auto_fill_pressed():
@@ -66,11 +68,24 @@ func _on_auto_fill_pressed():
 		status_label.text = "Bearer token loaded from local credentials"
 
 
+func _setup_iam_manager() -> void:
+	if config.uses_iam() and not config.api_key.is_empty():
+		if not iam_manager:
+			iam_manager = IamTokenManager.new()
+			add_child(iam_manager)
+		iam_manager.configure(config.api_key, config.auth_mode)
+	else:
+		iam_manager = null
+
+
 func _on_test_pressed():
 	_save_config()
+	_setup_iam_manager()
 	status_label.text = "Testing connection..."
+	if iam_manager:
+		status_label.text = "Obtaining IAM token..."
 	test_button.disabled = true
-	_wxo_client.configure(config)
+	_wxo_client.configure(config, iam_manager)
 	_wxo_client.test_connection()
 
 
@@ -81,9 +96,12 @@ func _on_connection_tested(_success: bool, message: String):
 
 func _on_enter_pressed():
 	_save_config()
+	_setup_iam_manager()
 	_set_loading(true)
 	status_label.text = "Loading data..."
-	_wxo_client.configure(config)
+	if iam_manager:
+		status_label.text = "Obtaining IAM token..."
+	_wxo_client.configure(config, iam_manager)
 	_wxo_client.fetch_all()
 
 

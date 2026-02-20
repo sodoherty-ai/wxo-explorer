@@ -11,6 +11,7 @@ const FONT_MEDIUM = preload("res://resources/fonts/IBM_Plex_Sans/static/IBMPlexS
 
 var graph_data: WxODataModel.GraphData
 var config: ConfigData
+var iam_manager: IamTokenManager
 var _manager: GraphManager
 var _starfield: Starfield
 var _chat_client: WxOChatClient
@@ -36,6 +37,12 @@ var _chat_drag_start_offset: float = 0.0
 const CHAT_MIN_HEIGHT = 120.0
 const CHAT_MAX_HEIGHT = 600.0
 
+# Search panel
+var _search_panel: PanelContainer
+var _search_input: LineEdit
+var _search_list: ItemList
+var _search_node_ids: Array[String] = []
+
 
 func _ready():
 	back_button.pressed.connect(_on_back_pressed)
@@ -43,6 +50,7 @@ func _ready():
 	status_label.add_theme_font_override("font", FONT_MEDIUM)
 	_build_detail_panel()
 	_build_chat_panel()
+	_build_search_panel()
 	_build_controls_panel()
 
 	_starfield = Starfield.new()
@@ -51,8 +59,10 @@ func _ready():
 
 	_chat_client = WxOChatClient.new()
 	add_child(_chat_client)
+	if iam_manager:
+		add_child(iam_manager)
 	if config:
-		_chat_client.configure(config)
+		_chat_client.configure(config, iam_manager)
 	_chat_client.message_received.connect(_on_chat_message_received)
 	_chat_client.chat_error.connect(_on_chat_error)
 	_chat_client.thinking_started.connect(_on_chat_thinking_started)
@@ -592,6 +602,125 @@ func _render_chat():
 	_chat_history.append_text("\n".join(_chat_lines))
 
 
+func _build_search_panel():
+	var hud = back_button.get_parent()
+
+	_search_panel = PanelContainer.new()
+	_search_panel.anchor_left = 0.5
+	_search_panel.anchor_right = 0.5
+	_search_panel.anchor_top = 0.0
+	_search_panel.anchor_bottom = 0.0
+	_search_panel.offset_left = -200.0
+	_search_panel.offset_right = 200.0
+	_search_panel.offset_top = 40.0
+	_search_panel.offset_bottom = 340.0
+
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.08, 0.08, 0.1, 0.92)
+	style.corner_radius_top_left = 6
+	style.corner_radius_top_right = 6
+	style.corner_radius_bottom_left = 6
+	style.corner_radius_bottom_right = 6
+	style.content_margin_left = 10.0
+	style.content_margin_right = 10.0
+	style.content_margin_top = 10.0
+	style.content_margin_bottom = 10.0
+	_search_panel.add_theme_stylebox_override("panel", style)
+
+	var vbox = VBoxContainer.new()
+	vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+
+	_search_input = LineEdit.new()
+	_search_input.placeholder_text = "Search nodes..."
+	_search_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_search_input.add_theme_font_override("font", FONT_LIGHT)
+	_search_input.add_theme_font_size_override("font_size", 12)
+	_search_input.text_changed.connect(_on_search_text_changed)
+	vbox.add_child(_search_input)
+
+	_search_list = ItemList.new()
+	_search_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_search_list.add_theme_font_override("font", FONT_LIGHT)
+	_search_list.add_theme_font_size_override("font_size", 11)
+	_search_list.item_selected.connect(_on_search_item_activated)
+	vbox.add_child(_search_list)
+
+	_search_panel.add_child(vbox)
+	hud.add_child(_search_panel)
+	_search_panel.visible = false
+
+
+func _toggle_search():
+	_search_panel.visible = not _search_panel.visible
+	if _search_panel.visible:
+		_search_input.text = ""
+		_search_input.grab_focus()
+		_update_search_results("")
+	else:
+		_search_input.release_focus()
+
+
+func _on_search_text_changed(query: String):
+	_update_search_results(query)
+
+
+func _update_search_results(query: String):
+	_search_list.clear()
+	_search_node_ids.clear()
+	if not graph_data:
+		return
+
+	var q = query.strip_edges().to_lower()
+	var type_colors = {
+		"agent": Color(0.29, 0.56, 0.85),
+		"tool": Color(0.31, 0.78, 0.47),
+		"knowledge_base": Color(0.91, 0.58, 0.23),
+	}
+	var type_labels = {
+		"agent": "Agent",
+		"tool": "Tool",
+		"knowledge_base": "KB",
+	}
+
+	# Collect matching entries: [display_name, type, id]
+	var entries: Array = []
+	for id in graph_data.agents:
+		var a = graph_data.agents[id]
+		if q.is_empty() or a.display_name.to_lower().find(q) != -1 or a.name.to_lower().find(q) != -1:
+			entries.append({"name": a.display_name, "type": "agent", "id": id})
+	for id in graph_data.tools:
+		var t = graph_data.tools[id]
+		if q.is_empty() or t.name.to_lower().find(q) != -1:
+			entries.append({"name": t.name, "type": "tool", "id": id})
+	for id in graph_data.knowledge_bases:
+		var kb = graph_data.knowledge_bases[id]
+		if q.is_empty() or kb.display_name.to_lower().find(q) != -1 or kb.name.to_lower().find(q) != -1:
+			entries.append({"name": kb.display_name, "type": "knowledge_base", "id": id})
+
+	for entry in entries:
+		var label = "[%s] %s" % [type_labels[entry["type"]], entry["name"]]
+		var idx = _search_list.add_item(label)
+		_search_list.set_item_custom_fg_color(idx, type_colors[entry["type"]])
+		_search_node_ids.append(entry["id"])
+
+
+func _on_search_item_activated(index: int):
+	if index < 0 or index >= _search_node_ids.size():
+		return
+	var node_id = _search_node_ids[index]
+	_search_panel.visible = false
+	_search_input.release_focus()
+	if _manager:
+		_manager.select_by_id(node_id)
+		# Move camera to frame the node and its connections
+		var bounds = _manager.get_node_cluster_bounds(node_id)
+		var center: Vector3 = bounds[0]
+		var radius: float = bounds[1]
+		camera.orbit_target = center
+		camera.orbit_distance = radius * 2.5 + 5.0
+		camera._update_orbit_transform()
+
+
 func _build_controls_panel():
 	var hud = back_button.get_parent()
 
@@ -635,6 +764,7 @@ func _build_controls_panel():
 	text += "[color=#999999]Tab[/color]  Toggle Orbit / Free-fly\n"
 	text += "[color=#999999]Space[/color]  Pause / Resume layout\n"
 	text += "[color=#999999]Click[/color]  Select node\n"
+	text += "[color=#999999]F[/color]  Search nodes\n"
 	text += "[color=#999999]Esc[/color]  Back\n"
 	text += "[color=#666666]Gamepad: Sticks, Triggers, Triangle[/color]"
 	label.append_text(text)
@@ -644,6 +774,19 @@ func _build_controls_panel():
 
 
 func _unhandled_input(event):
+	if event is InputEventKey and event.pressed and event.keycode == KEY_F:
+		var gui_has_focus = get_viewport().gui_get_focus_owner()
+		# Only toggle search if no other input has focus (or search input itself has focus)
+		if gui_has_focus == null or gui_has_focus == _search_input:
+			_toggle_search()
+			get_viewport().set_input_as_handled()
+			return
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		if _search_panel.visible:
+			_search_panel.visible = false
+			_search_input.release_focus()
+			get_viewport().set_input_as_handled()
+			return
 	if event.is_action_pressed("ui_cancel"):
 		back_pressed.emit()
 

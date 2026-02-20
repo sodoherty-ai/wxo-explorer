@@ -18,11 +18,12 @@ func _show_intro():
 	current_screen = intro
 
 
-func _show_graph(graph_data: WxODataModel.GraphData, config: ConfigData = null):
+func _show_graph(graph_data: WxODataModel.GraphData, config: ConfigData = null, iam_mgr: IamTokenManager = null):
 	_clear_screen()
 	var graph = graph_screen_scene.instantiate()
 	graph.graph_data = graph_data
 	graph.config = config
+	graph.iam_manager = iam_mgr
 	graph.back_pressed.connect(_on_back_pressed)
 	add_child(graph)
 	current_screen = graph
@@ -37,7 +38,11 @@ func _clear_screen():
 func _on_data_ready(graph_data: WxODataModel.GraphData):
 	var intro = current_screen as Control
 	var config = intro.config if intro else ConfigData.load_config()
-	_show_graph(graph_data, config)
+	var iam_mgr = intro.iam_manager if intro else null
+	# Reparent IAM manager so it survives screen transition
+	if iam_mgr and iam_mgr.get_parent():
+		iam_mgr.get_parent().remove_child(iam_mgr)
+	_show_graph(graph_data, config, iam_mgr)
 
 
 func _on_back_pressed():

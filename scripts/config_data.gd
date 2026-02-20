@@ -1,7 +1,7 @@
 class_name ConfigData
 extends Resource
 
-enum AuthMode { LOCAL_BEARER, SAAS_API_KEY }
+enum AuthMode { LOCAL_BEARER, WXO_API_KEY, IBM_CLOUD_API_KEY }
 
 @export var server_url: String = "http://localhost:4321"
 @export var auth_mode: int = AuthMode.LOCAL_BEARER
@@ -67,7 +67,20 @@ func get_auth_header() -> String:
 	match auth_mode:
 		AuthMode.LOCAL_BEARER:
 			return "Bearer " + bearer_token
-		AuthMode.SAAS_API_KEY:
-			return "Bearer " + api_key
+		AuthMode.WXO_API_KEY, AuthMode.IBM_CLOUD_API_KEY:
+			return "Bearer " + api_key  # Placeholder; IAM manager replaces this
 		_:
 			return ""
+
+
+func uses_iam() -> bool:
+	return auth_mode in [AuthMode.WXO_API_KEY, AuthMode.IBM_CLOUD_API_KEY]
+
+
+func get_base_api_url() -> String:
+	var url = server_url.rstrip("/")
+	match auth_mode:
+		AuthMode.LOCAL_BEARER:
+			return url + "/api"  # Local dev: http://localhost:4321/api
+		_:
+			return url  # SaaS: instance URL is the base already

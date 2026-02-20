@@ -24,7 +24,12 @@ func _ready():
 func _start_fetch():
 	var config = ConfigData.load_config()
 	_log("Server: " + config.server_url)
-	_log("Auth mode: " + ("Local Bearer" if config.auth_mode == ConfigData.AuthMode.LOCAL_BEARER else "SaaS API Key"))
+	var mode_names = {
+		ConfigData.AuthMode.LOCAL_BEARER: "Local Bearer",
+		ConfigData.AuthMode.WXO_API_KEY: "API Key (wxO)",
+		ConfigData.AuthMode.IBM_CLOUD_API_KEY: "API Key (IBM Cloud)",
+	}
+	_log("Auth mode: " + mode_names.get(config.auth_mode, "Unknown"))
 
 	_wxo_client.configure(config)
 	_wxo_client.debug_log.connect(_on_debug_log)

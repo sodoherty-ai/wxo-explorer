@@ -12,6 +12,8 @@ var _auth_header: String
 var _thread_id: String = ""
 var _agent_id: String = ""
 var _http: HTTPRequest
+var _iam_manager: IamTokenManager
+var _is_local: bool = true
 
 
 func _ready():
@@ -20,9 +22,20 @@ func _ready():
 	add_child(_http)
 
 
-func configure(config: ConfigData) -> void:
-	_base_url = config.server_url.rstrip("/") + "/api"
-	_auth_header = config.get_auth_header()
+func configure(config: ConfigData, iam_manager: IamTokenManager = null) -> void:
+	_base_url = config.get_base_api_url()
+	_is_local = (config.auth_mode == ConfigData.AuthMode.LOCAL_BEARER)
+	_iam_manager = iam_manager
+	if iam_manager:
+		_auth_header = ""
+	else:
+		_auth_header = config.get_auth_header()
+
+
+func _get_auth_header() -> String:
+	if _iam_manager:
+		return _iam_manager.get_auth_header()
+	return _auth_header
 
 
 func restore_session(agent_id: String, thread_id: String) -> void:
@@ -33,16 +46,23 @@ func restore_session(agent_id: String, thread_id: String) -> void:
 func start_session(agent_id: String) -> void:
 	_agent_id = agent_id
 	_thread_id = ""
+	# Ensure IAM token is valid before creating thread
+	if _iam_manager and not _iam_manager.is_token_valid():
+		var success = await _iam_manager.ensure_token()
+		if not success:
+			chat_error.emit("Failed to obtain IAM token")
+			return
 	# Create a new thread for this agent
 	var http = HTTPRequest.new()
 	add_child(http)
 	var headers = [
-		"Authorization: " + _auth_header,
+		"Authorization: " + _get_auth_header(),
 		"Content-Type: application/json",
 	]
 	var body = JSON.stringify({"agent_id": agent_id})
 	http.request_completed.connect(_on_thread_created.bind(http))
-	var err = http.request(_base_url + "/v1/threads", headers, HTTPClient.METHOD_POST, body)
+	var threads_path = "/v1/threads" if _is_local else "/v1/orchestrate/threads"
+	var err = http.request(_base_url + threads_path, headers, HTTPClient.METHOD_POST, body)
 	if err != OK:
 		chat_error.emit("Failed to create thread")
 
@@ -52,10 +72,17 @@ func send_message(text: String) -> void:
 		chat_error.emit("No agent selected")
 		return
 
+	# Ensure IAM token is valid before sending
+	if _iam_manager and not _iam_manager.is_token_valid():
+		var success = await _iam_manager.ensure_token()
+		if not success:
+			chat_error.emit("Failed to refresh IAM token")
+			return
+
 	thinking_started.emit()
 
 	var headers = [
-		"Authorization: " + _auth_header,
+		"Authorization: " + _get_auth_header(),
 		"Content-Type: application/json",
 	]
 
